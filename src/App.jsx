@@ -17,7 +17,7 @@ import {
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
 const BLOCKCHAIN_RPC_URL = import.meta.env.VITE_BLOCKCHAIN_RPC_URL || 'http://127.0.0.1:7545';
 const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS || '0x0bd235EBe41CF0d7C4638A774ef20bdF9C271E57';
-const DEFAULT_USER = import.meta.env.VITE_DEFAULT_USER || 'Admin (Vansh)';
+const DEFAULT_USER = 'Admin (BBDU)';
 const WOKWI_SIM_URL = import.meta.env.VITE_WOKWI_SIM_URL || '';
 
 const CONTRACT_ABI = [
