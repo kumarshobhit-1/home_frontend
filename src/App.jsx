@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { ethers } from 'ethers';
 import {
@@ -14,10 +14,9 @@ import {
   Unlock,
 } from 'lucide-react';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://home-backend-zjsn.onrender.com';
 const BLOCKCHAIN_RPC_URL = import.meta.env.VITE_BLOCKCHAIN_RPC_URL || 'http://127.0.0.1:7545';
 const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS || '0x0bd235EBe41CF0d7C4638A774ef20bdF9C271E57';
-const DEFAULT_USER = 'Admin (BBDU)';
 const WOKWI_SIM_URL = import.meta.env.VITE_WOKWI_SIM_URL || '';
 
 const CONTRACT_ABI = [
@@ -69,8 +68,12 @@ function App() {
   const [actionLoading, setActionLoading] = useState(null);
   const [status, setStatus] = useState({ temp: null, hum: null, mcb_status: true, updatedAt: null });
   const [streamConnected, setStreamConnected] = useState(false);
+  const [streamReconnectAttempt, setStreamReconnectAttempt] = useState(0);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [backendHealth, setBackendHealth] = useState({ mqttConnected: false, blockchainEnabled: false });
+  const [isOnline, setIsOnline] = useState(typeof navigator === 'undefined' ? true : navigator.onLine);
+  const streamSourceRef = useRef(null);
+  const reconnectTimerRef = useRef(null);
 
   const [deviceStatus, setDeviceStatus] = useState({
     door: 'locked',
@@ -126,11 +129,27 @@ function App() {
   };
 
   useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!isOnline) return;
+
     fetchLogs();
     fetchDeviceStatus();
     fetchHealth();
 
     const timerId = setInterval(() => {
+      if (!navigator.onLine) return;
       fetchDeviceStatus();
       fetchHealth();
     }, 10000);
@@ -139,23 +158,63 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const eventSource = new EventSource(`${API_BASE_URL}/api/device/stream`);
+    let disposed = false;
 
-    eventSource.onopen = () => setStreamConnected(true);
-    eventSource.onmessage = (event) => {
-      try {
-        const payload = JSON.parse(event.data);
-        setStatus(payload);
-      } catch (error) {
-        console.error('Stream parse error:', error);
+    const clearCurrentStream = () => {
+      if (streamSourceRef.current) {
+        streamSourceRef.current.close();
+        streamSourceRef.current = null;
+      }
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
       }
     };
 
-    eventSource.onerror = () => {
-      setStreamConnected(false);
+    const connectStream = () => {
+      if (disposed) return;
+      if (!navigator.onLine) {
+        setStreamConnected(false);
+        reconnectTimerRef.current = setTimeout(connectStream, 2500);
+        return;
+      }
+
+      const eventSource = new EventSource(`${API_BASE_URL}/api/device/stream`);
+      streamSourceRef.current = eventSource;
+
+      eventSource.onopen = () => {
+        setStreamConnected(true);
+        setStreamReconnectAttempt(0);
+      };
+
+      eventSource.onmessage = (event) => {
+        try {
+          const payload = JSON.parse(event.data);
+          setStatus(payload);
+        } catch (error) {
+          console.error('Stream parse error:', error);
+        }
+      };
+
+      eventSource.onerror = () => {
+        eventSource.close();
+        setStreamConnected(false);
+
+        setStreamReconnectAttempt((prev) => {
+          const nextAttempt = prev + 1;
+          const backoffMs = Math.min(12000, Math.max(1500, nextAttempt * 1500));
+          reconnectTimerRef.current = setTimeout(connectStream, backoffMs);
+          return nextAttempt;
+        });
+      };
     };
 
-    return () => eventSource.close();
+    connectStream();
+
+    return () => {
+      disposed = true;
+      clearCurrentStream();
+    };
   }, []);
 
   useEffect(() => {
@@ -182,6 +241,11 @@ function App() {
   };
 
   const sendCommand = async (device, command) => {
+    if (!navigator.onLine) {
+      alert('You are offline. Reconnect to internet and try again.');
+      return;
+    }
+
     if (!deviceStatus.mcb && command !== 'MCB_ON') {
       alert('SYSTEM IN LOCKDOWN: Cannot send commands until MCB is restored.');
       return;
@@ -202,7 +266,6 @@ function App() {
       await axios.post(`${API_BASE_URL}/api/device/control`, {
         device,
         command,
-        user: DEFAULT_USER,
       });
       notifyOnDevice('Smart Home Command Sent', `${device} -> ${command}`);
       setTimeout(fetchLogs, 1500);
@@ -218,6 +281,18 @@ function App() {
         !deviceStatus.mcb ? 'bg-red-950' : 'bg-gray-900'
       } text-white`}
     >
+      {!isOnline ? (
+        <div className="max-w-6xl mx-auto mb-4 rounded-xl border border-yellow-500/40 bg-yellow-900/30 px-4 py-3 text-sm text-yellow-100">
+          Offline mode: commands are disabled until internet reconnects.
+        </div>
+      ) : null}
+
+      {isOnline && !streamConnected ? (
+        <div className="max-w-6xl mx-auto mb-4 rounded-xl border border-blue-500/40 bg-blue-900/30 px-4 py-3 text-sm text-blue-100">
+          Reconnecting live stream{streamReconnectAttempt > 0 ? ` (attempt ${streamReconnectAttempt})` : ''}...
+        </div>
+      ) : null}
+
       <div className="max-w-6xl mx-auto space-y-6 md:space-y-8">
         <header className="flex flex-col gap-4 md:flex-row md:justify-between md:items-end border-b border-gray-700 pb-4">
           <div>
