@@ -1,0 +1,27 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+	margin: 0;
+	min-height: 100vh;
+	background: #030712;
+}
+
+.custom-scrollbar::-webkit-scrollbar {
+	width: 8px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-track {
+	background: rgba(30, 41, 59, 0.35);
+	border-radius: 9999px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb {
+	background: rgba(59, 130, 246, 0.55);
+	border-radius: 9999px;
+}
+
+.custom-scrollbar::-webkit-scrollbar-thumb:hover {
+	background: rgba(59, 130, 246, 0.85);
+}
